@@ -4,9 +4,13 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 )
 
 func main() {
+
+	var mu sync.Mutex
+
 	// Start TCP server on port 6380
 	ln, err := net.Listen("tcp", ":6380")
 	if err != nil {
@@ -29,12 +33,12 @@ func main() {
 
 
 		// Handle this client's communication in a separate function
-		go handleConnection(conn, store)
+		go handleConnection(conn, store,&mu)
 
 	}
 }
 
-func handleConnection(conn net.Conn, store map[string]string) {
+func handleConnection(conn net.Conn, store map[string]string,mu *sync.Mutex) {
 
 	// Reusable byte buffer for reading incoming data
 	buffer := make([]byte, 1024)
@@ -92,12 +96,16 @@ func handleConnection(conn net.Conn, store map[string]string) {
 				conn.Write([]byte("ERR syntax: SET key value\n"))
 				continue
 			}
+			mu.Lock()
 			store[key] = value
+			mu.Unlock()
 			conn.Write([]byte("OK\n"))
 
 		// GET key
 		case "GET":
+			mu.Lock()
 			val, exists := store[key]
+			mu.Unlock()
 			if !exists {
 				conn.Write([]byte("(nil)\n"))
 			} else {
@@ -110,11 +118,14 @@ func handleConnection(conn net.Conn, store map[string]string) {
 				conn.Write([]byte("ERR syntax: DEL key\n"))
 				continue
 			}
+			mu.Lock()
 			_, exists := store[key]
 			if !exists {
 				conn.Write([]byte("0\n"))
+				mu.Unlock()
 			} else {
 				delete(store, key)
+				mu.Unlock()
 				conn.Write([]byte("1\n"))
 			}
 
@@ -124,7 +135,9 @@ func handleConnection(conn net.Conn, store map[string]string) {
 				conn.Write([]byte("ERR syntax: EXISTS key\n"))
 				continue
 			}
+			mu.Lock()
 			_, exists := store[key]
+			mu.Unlock()
 			if exists {
 				conn.Write([]byte("1\n"))
 			} else {
@@ -133,16 +146,20 @@ func handleConnection(conn net.Conn, store map[string]string) {
 
 		// KEYS — list all keys
 		case "KEYS":
+			mu.Lock()
 			if len(store) == 0 {
+				mu.Unlock()
 				conn.Write([]byte("(empty)\n"))
 				continue
 			}
 			for k := range store {
 				conn.Write([]byte(k + "\n"))
 			}
+			mu.Unlock()
 
 		// CLEAR — delete all keys
 		case "CLEAR":
+			mu.Lock()
 			if len(store) == 0 {
 				conn.Write([]byte("OK\n"))
 				continue
@@ -151,6 +168,7 @@ func handleConnection(conn net.Conn, store map[string]string) {
 			for k := range store {
 				delete(store, k)
 			}
+			mu.Unlock()
 			conn.Write([]byte("OK\n"))
 
 		// TYPE key — return type of stored value
